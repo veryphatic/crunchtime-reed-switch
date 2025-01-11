@@ -29,7 +29,8 @@ const char* ssid = "CrunchTime";         // EditThis: The name of your WiFi acce
 const char* password = "********";       // EditThis: The password of your WiFi access point.
 const IPAddress labIp(10,0,1,2);         // EditThis: The IP address of the QLab machine to recieve OSC messages.
 const unsigned int talPort = 8765;       // EditThis: The port listenting for tally OSC messages, default to 8765.
-const unsigned int sensorId = 1;         // EditThis: The ID of the sensor (useful for multple sensors).
+const unsigned int sensorId = 10;         // EditThis: The ID of the sensor (useful for multple sensors).
+const char* hostname = "ctsensor-10" ;   // EditThis: The hostname for the sensor (for easy network lookup)
 
 constexpr uint8_t RST_PIN = 0;           // The pins that the RFID sensor is connected to.
 constexpr uint8_t SS_PIN = 15;
@@ -59,6 +60,9 @@ bool getOSCData();
 void connectWiFi() {
   // Prevent need for powercyle after upload.
   WiFi.disconnect();
+
+  // Set a unique hostname
+  WiFi.setHostname(hostname);
 
   // Use DHCP to connect and obtain IP Address.
   WiFi.mode(WIFI_STA);
