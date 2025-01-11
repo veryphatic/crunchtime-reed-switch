@@ -7,6 +7,32 @@ The OSC messages are compatible with qLab.
 
 More details at: [http://reprage.com/post/crunchtime](http://reprage.com/post/crunchtime)
 
+## Build notes
+
+### Windows 11 Support
+
+- Don't use Windows 11 Silicon labs CP210x Windows drivers v6.7.6 with the D1 Mini; it won't work.
+
+### .pio/libdeps/d1_mini/OSC/SLIPEncodedBluetoothSerial.h:11:10: fatal error: BluetoothSerial.h: No such file or directory
+
+The CMAT OSC library contains additional headers that are missing references to BluetoothSerial.h. 
+Since this application does not require BluetoothSerial, the two affected files can be removed
+- `.pio/libdeps/d1_mini/OSC/SLIPEncodedBluetoothSerial.h`
+- `.pio/libdeps/d1_mini/OSC/SLIPEncodedBluetoothSerial.cpp`
+
+### Lonely Binary board support
+
+As of January 2025 new replacement boards are using the Lonely Binary D1 Mini ESP8266EX boards. Additional confirmations have been added to `platform.io` to support this board.
+
+
+## Changelog
+
+_11/01/2025_
+
+- Updated readme
+- Updated `platformio.ini` with `d1_mini` environment
+- Added hostname to sensor boards
+
 
 ## License
 
