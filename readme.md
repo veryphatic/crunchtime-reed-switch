@@ -9,6 +9,15 @@ More details at: [http://reprage.com/post/crunchtime](http://reprage.com/post/cr
 
 ## Build notes
 
+How to build.
+
+1. Open VSCode to the Crunchtime application
+2. Edit the `main.cpp` file to change the sensor and hostname ID and save
+3. Click the Alien icon, and under `d1_mini` -> `General` run `Build`
+4. Make sure the device is plugged in
+5. Under `d1_mini` -> `General` run `Upload and monitor`
+6. If succesful you should see `WiFi Connected!` and `Firmware Version: 0x92 = v2.0`
+
 ### Windows 11 Support
 
 - Don't use Windows 11 Silicon labs CP210x Windows drivers v6.7.6 with the D1 Mini; it won't work.
@@ -23,6 +32,10 @@ Since this application does not require BluetoothSerial, the two affected files 
 ### Lonely Binary board support
 
 As of January 2025 new replacement boards are using the Lonely Binary D1 Mini ESP8266EX boards. Additional confirmations have been added to `platform.io` to support this board.
+
+### Apple Silicon
+
+You'll need to have Rosetta installed to support the C++ libraries. By default it's not. You can install this by opening the application info of Terminal app, and ticking the 'Open with Rosetta' option. Once the app starts Rosettta will install
 
 
 ## Changelog
