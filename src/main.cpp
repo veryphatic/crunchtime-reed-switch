@@ -22,24 +22,53 @@
 #include <OSCMessage.h>
 #include <SPI.h>
 #include <MFRC522.h>
+#include "../env_config.h"
+
 
 WiFiUDP Udp;
 
-const char* ssid = "CrunchTime";         // EditThis: The name of your WiFi access point.
-const char* password = "********";       // EditThis: The password of your WiFi access point.
-const IPAddress labIp(10,0,1,2);         // EditThis: The IP address of the QLab machine to recieve OSC messages.
-const unsigned int talPort = 8765;       // EditThis: The port listenting for tally OSC messages, default to 8765.
-const unsigned int sensorId = 10;         // EditThis: The ID of the sensor (useful for multple sensors).
-const char* hostname = "ctsensor-10" ;   // EditThis: The hostname for the sensor (for easy network lookup)
+struct WifiEnv = {
+  const char* ssid;
+  const char* password;
+  IPAddress ip;
 
-constexpr uint8_t RST_PIN = 0;           // The pins that the RFID sensor is connected to.
-constexpr uint8_t SS_PIN = 15;
+  constexpr WifiEnv(const char* ssid, const char* password, IPAddress ip)
+        : ssid(ssid), password(password), ip(ip) {}
+}
+
+// home (ssid, password, ipaddress) -- set in the env_config.h files
+constexpr WifiEnv home(HOME_SSID, HOME_PASSWORD, HOME_IP);
+
+// counterpilot (ssid, password, ipaddress) -- set in the env_config.h files
+constexpr WifiEnv counterpilot(COUNTER_SSID, COUNTER_PASSWORD, COUNTER_IP);
+
+// set the current wifi environment -- change this to switch between environments
+const WifiEnv& currentEnv = counterpilot;
+
+// set ssid, password, ip from wifi env
+const char* ssid = currentEnv.ssid;
+const char* password = currentEnv.password;
+IPAddress labIp = currentEnv.ip;
+
+// change these for each sensor
+const unsigned int sensorId = 2;         // EditThis: The ID of the sensor (useful for multple sensors).
+const char *hostname = "ctsensor-2";     // EditThis: The hostname for the sensor (for easy network lookup)
+
+const unsigned int talPort = 8765;       // EditThis: The port listenting for tally OSC messages, default to 8765.
+
+constexpr uint8_t RST_PIN = D3;          // The pins that the RFID sensor is connected to.
+constexpr uint8_t SS_PIN = D8;  // 15;
 const unsigned int ACK_TIMEOUT = 250;
 
-MFRC522 mfrc522(SS_PIN, RST_PIN);        // Create MFRC522 instance
+MFRC522 mfrc522(SS_PIN, RST_PIN); // Create MFRC522 instance
 
-const unsigned int localPort = 53001;    // The local listening port for UDP packets.
-const unsigned int uuidLength = 17;      // The length of RFID uuids.
+const unsigned int localPort = 53001; // The local listening port for UDP packets.
+const unsigned int uuidLength = 17;   // The length of RFID uuids.
+
+// presence averaging
+const int UUID_HISTORY_LEN = 5;
+char uuidHistory[UUID_HISTORY_LEN][uuidLength];
+int uuidIndex = 0;
 
 typedef struct State_struct (*StateFn)(struct State_struct current_state);
 
@@ -70,12 +99,14 @@ void connectWiFi() {
 
   // Wait until we have connected to the WiFi AP.
   while (WiFi.status() != WL_CONNECTED) {
-     delay(500);
-     Serial.print(".");
+    delay(500);
+    Serial.print(".");
   }
 
   Serial.println("");
-  Serial.println("WiFi Connected!");
+  Serial.println("WiFi Connected! IP Address:");
+  Serial.println(WiFi.localIP());
+  Serial.printf("Sensor ID %d\n", sensorId);
 }
 
 // setup executes once after booting. It configures the underlying hardware for
@@ -86,7 +117,7 @@ void setup() {
   randomSeed(analogRead(0));
 
   // Put in a startup delay of ten to twenty seconds before connecting to the WiFi.
-  delay(random(0,15000));
+  delay(random(0, 15000));
   connectWiFi();
 
   // Init UDP to broadcast OSC messages.
@@ -95,12 +126,15 @@ void setup() {
   // Init MFRC522 RFID Sensor.
   SPI.begin();
   mfrc522.PCD_Init();
+
+  // Improve sensitivity but needs to be tested on the table for interferrence
+  mfrc522.PCD_SetAntennaGain(mfrc522.RxGain_max);
   mfrc522.PCD_DumpVersionToSerial();
 
-  memset(state.uuid,'\0', uuidLength);
+  memset(state.uuid, '\0', uuidLength);
   sprintf(&state.uuid[0], "nothing\0");
 
-  memset(state.sentUuid,'\0', uuidLength);
+  memset(state.sentUuid, '\0', uuidLength);
   sprintf(&state.sentUuid[0], "nothing\0");
   state.update = Idle;
 }
@@ -156,8 +190,8 @@ bool getOSCData() {
 // getUuid is a helper routine that fetches the ID of the RFID chip in uuid.
 void getUuid(char uuid[uuidLength]) {
   if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
-    for (unsigned int i = 0; i < ((uuidLength-1)/2); i++) {
-      sprintf(&uuid[(i*2)], "%02X", mfrc522.uid.uidByte[i]);
+    for (unsigned int i = 0; i < ((uuidLength - 1) / 2); i++) {
+      sprintf(&uuid[(i * 2)], "%02X", mfrc522.uid.uidByte[i]);
     }
   } else {
     sprintf(&uuid[0], "nothing\0");
@@ -215,7 +249,7 @@ State Detected(State current_state) {
 
 // loop repeats over and over on the microcontroller.
 void loop() {
-  delay(100);
+  delay(20);
 
   if (WiFi.status() != WL_CONNECTED) {
     connectWiFi();
