@@ -13,7 +13,7 @@ How to build.
 
 1. Open VSCode to the Crunchtime application
 2. Edit the `main.cpp` file to change the sensor and hostname ID and save
-3. Click the Alien icon, and under `d1_mini` -> `General` run `Build`
+3. Click the Alien icon, then `Project Tasks` and under `d1_mini` -> `General` run `Build`
 4. Make sure the device is plugged in
 5. Under `d1_mini` -> `General` run `Upload and monitor`
 6. If succesful you should see `WiFi Connected!` and `Firmware Version: 0x92 = v2.0`
