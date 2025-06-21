@@ -27,20 +27,20 @@
 
 WiFiUDP Udp;
 
-struct WifiEnv = {
+struct WifiEnv {
   const char* ssid;
   const char* password;
   IPAddress ip;
 
-  constexpr WifiEnv(const char* ssid, const char* password, IPAddress ip)
+  WifiEnv(const char* ssid, const char* password, IPAddress ip)
         : ssid(ssid), password(password), ip(ip) {}
-}
+};
 
 // home (ssid, password, ipaddress) -- set in the env_config.h files
-constexpr WifiEnv home(HOME_SSID, HOME_PASSWORD, HOME_IP);
+// constexpr WifiEnv home(HOME_SSID, HOME_PASSWORD, HOME_IP);
 
 // counterpilot (ssid, password, ipaddress) -- set in the env_config.h files
-constexpr WifiEnv counterpilot(COUNTER_SSID, COUNTER_PASSWORD, COUNTER_IP);
+WifiEnv counterpilot(COUNTER_SSID, COUNTER_PASSWORD, COUNTER_IP);
 
 // set the current wifi environment -- change this to switch between environments
 const WifiEnv& currentEnv = counterpilot;
@@ -51,8 +51,8 @@ const char* password = currentEnv.password;
 IPAddress labIp = currentEnv.ip;
 
 // change these for each sensor
-const unsigned int sensorId = 2;         // EditThis: The ID of the sensor (useful for multple sensors).
-const char *hostname = "ctsensor-2";     // EditThis: The hostname for the sensor (for easy network lookup)
+const unsigned int sensorId = 27;         // EditThis: The ID of the sensor (useful for multple sensors).
+const char *hostname = "ctsensor-27";     // EditThis: The hostname for the sensor (for easy network lookup)
 
 const unsigned int talPort = 8765;       // EditThis: The port listenting for tally OSC messages, default to 8765.
 
@@ -113,7 +113,7 @@ void connectWiFi() {
 // use in the main loop.
 void setup() {
   Serial.begin(9600);
-
+  Serial.printf("wifi: %s\n", ssid);
   randomSeed(analogRead(0));
 
   // Put in a startup delay of ten to twenty seconds before connecting to the WiFi.
