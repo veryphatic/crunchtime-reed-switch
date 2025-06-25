@@ -37,13 +37,13 @@ struct WifiEnv {
 };
 
 // home (ssid, password, ipaddress) -- set in the env_config.h files
-// constexpr WifiEnv home(HOME_SSID, HOME_PASSWORD, HOME_IP);
+constexpr WifiEnv wifi(HOME_SSID, HOME_PASSWORD, HOME_IP);
 
 // counterpilot (ssid, password, ipaddress) -- set in the env_config.h files
-WifiEnv counterpilot(COUNTER_SSID, COUNTER_PASSWORD, COUNTER_IP);
+// WifiEnv wifi(COUNTER_SSID, COUNTER_PASSWORD, COUNTER_IP);
 
 // set the current wifi environment -- change this to switch between environments
-const WifiEnv& currentEnv = counterpilot;
+const WifiEnv& currentEnv = wifi;
 
 // set ssid, password, ip from wifi env
 const char* ssid = currentEnv.ssid;
