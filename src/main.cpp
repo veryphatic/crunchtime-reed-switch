@@ -17,30 +17,26 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 #include <ESP8266Wifi.h>
-#include <WiFiUdp.h>
 #include <Arduino.h>
 #include <OSCMessage.h>
-#include <SPI.h>
-#include <MFRC522.h>
 #include "../env_config.h"
+#include "./wifi.h"
 
 
-WiFiUDP Udp;
+// ------------------------------------------------------------------------------------------------------------------ Edit these settings
 
-struct WifiEnv {
-  const char* ssid;
-  const char* password;
-  IPAddress ip;
+// Sets the wifi environment - use env_config.h to store values
+const WifiEnv wifi(HOME_SSID, HOME_PASSWORD, CRUNCH_TALLY);
 
-  WifiEnv(const char* ssid, const char* password, IPAddress ip)
-        : ssid(ssid), password(password), ip(ip) {}
-};
+// change these for each sensor
+const unsigned int sensorId = 27;         // Give the sensor a unique ID
+const char *hostname = "ctsensor-27";     // Append the sensor ID to the hostname
 
-// home (ssid, password, ipaddress) -- set in the env_config.h files
-constexpr WifiEnv wifi(HOME_SSID, HOME_PASSWORD, HOME_IP);
+// OSC settings
+const unsigned int talPort = 8765;       // Set the port listenting for tally OSC messages, default to 8765.
 
-// counterpilot (ssid, password, ipaddress) -- set in the env_config.h files
-// WifiEnv wifi(COUNTER_SSID, COUNTER_PASSWORD, COUNTER_IP);
+
+// ------------------------------------------------------------------------------------------------------------------ Don't edit anything below here
 
 // set the current wifi environment -- change this to switch between environments
 const WifiEnv& currentEnv = wifi;
@@ -50,31 +46,22 @@ const char* ssid = currentEnv.ssid;
 const char* password = currentEnv.password;
 IPAddress labIp = currentEnv.ip;
 
-// change these for each sensor
-const unsigned int sensorId = 27;         // EditThis: The ID of the sensor (useful for multple sensors).
-const char *hostname = "ctsensor-27";     // EditThis: The hostname for the sensor (for easy network lookup)
 
-const unsigned int talPort = 8765;       // EditThis: The port listenting for tally OSC messages, default to 8765.
-
-constexpr uint8_t RST_PIN = D3;          // The pins that the RFID sensor is connected to.
-constexpr uint8_t SS_PIN = D8;  // 15;
+constexpr uint8_t REED_PIN = D1;         // Reed switch connected to GPIO D1
 const unsigned int ACK_TIMEOUT = 250;
+const unsigned int DEBOUNCE_DELAY = 50;  // Debounce delay in milliseconds
+const unsigned int localPort = 53001;    // The local listening port for UDP packets.
 
-MFRC522 mfrc522(SS_PIN, RST_PIN); // Create MFRC522 instance
-
-const unsigned int localPort = 53001; // The local listening port for UDP packets.
-const unsigned int uuidLength = 17;   // The length of RFID uuids.
-
-// presence averaging
-const int UUID_HISTORY_LEN = 5;
-char uuidHistory[UUID_HISTORY_LEN][uuidLength];
-int uuidIndex = 0;
+// Reed switch state tracking
+bool lastReedState = LOW;               // Assume switch starts open (HIGH = open, LOW = closed)
+bool currentReedState = LOW;
+unsigned long lastDebounceTime = 0;
 
 typedef struct State_struct (*StateFn)(struct State_struct current_state);
 
 typedef struct State_struct {
-  char uuid[uuidLength];
-  char sentUuid[uuidLength];
+  bool switchClosed;
+  bool lastSentState;
 
   StateFn update; // The current function to use to update state.
 } State;
@@ -103,7 +90,7 @@ void connectWiFi() {
     Serial.print(".");
   }
 
-  Serial.println("");
+  Serial.println("\n");
   Serial.println("WiFi Connected! IP Address:");
   Serial.println(WiFi.localIP());
   Serial.printf("Sensor ID %d\n", sensorId);
@@ -113,8 +100,11 @@ void connectWiFi() {
 // use in the main loop.
 void setup() {
   Serial.begin(9600);
-  Serial.printf("wifi: %s\n", ssid);
+  Serial.printf("\nwifi: %s\n", ssid);
   randomSeed(analogRead(0));
+
+  // Configure reed switch pin with internal pull-up resistor
+  pinMode(REED_PIN, INPUT_PULLUP);
 
   // Put in a startup delay of ten to twenty seconds before connecting to the WiFi.
   delay(random(0, 15000));
@@ -123,35 +113,32 @@ void setup() {
   // Init UDP to broadcast OSC messages.
   Udp.begin(localPort);
 
-  // Init MFRC522 RFID Sensor.
-  SPI.begin();
-  mfrc522.PCD_Init();
-
-  // Improve sensitivity but needs to be tested on the table for interferrence
-  mfrc522.PCD_SetAntennaGain(mfrc522.RxGain_max);
-  mfrc522.PCD_DumpVersionToSerial();
-
-  memset(state.uuid, '\0', uuidLength);
-  sprintf(&state.uuid[0], "nothing\0");
-
-  memset(state.sentUuid, '\0', uuidLength);
-  sprintf(&state.sentUuid[0], "nothing\0");
+  // Initialize state
+  state.switchClosed = true;
+  state.lastSentState = true;
   state.update = Idle;
+
+  Serial.println("Reed switch sensor initialized");
 }
 
 void sendPacket(IPAddress dstIp, const unsigned int dstPort, const char *tag) {
   OSCMessage msg(tag);
   int err = Udp.beginPacket(dstIp, dstPort);
-  Serial.print("Begin: ");
-  Serial.println(err);
+  if (err == 0) {
+    Serial.println("Could not initalie buffer");
+  } 
+
   msg.send(Udp);
+
   err = Udp.endPacket();
-  Serial.print("End: ");
-  Serial.println(err);
+  if (err == 0) {
+    Serial.println("Could not send buffered data");
+  }
+
   msg.empty();
 }
 
-// sendOSCData broadcasts RFID information over OSC to the dst address.
+// sendOSCData broadcasts reed switch information over OSC to the dst address.
 void sendOSCData(IPAddress dstIp, const unsigned int dstPort, const char *tag) {
   bool ack = false;
 
@@ -163,11 +150,8 @@ void sendOSCData(IPAddress dstIp, const unsigned int dstPort, const char *tag) {
 }
 
 bool getOSCData() {
-  Serial.println("Getting OSC DATA");
-
   OSCMessage msg;
   int size = Udp.parsePacket();
-  Serial.println(size);
 
   if (size > 0) {
     while (size--) {
@@ -175,11 +159,11 @@ bool getOSCData() {
     }
 
     if (!msg.hasError()) {
-      Serial.println("got message");
+      Serial.println("OSC: ack");
       return true;
     } else {
       OSCErrorCode error = msg.getError();
-      Serial.print("error: ");
+      Serial.print("OSC error: ");
       Serial.println(error);
     }
   }
@@ -187,61 +171,72 @@ bool getOSCData() {
   return false;
 }
 
-// getUuid is a helper routine that fetches the ID of the RFID chip in uuid.
-void getUuid(char uuid[uuidLength]) {
-  if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
-    for (unsigned int i = 0; i < ((uuidLength - 1) / 2); i++) {
-      sprintf(&uuid[(i * 2)], "%02X", mfrc522.uid.uidByte[i]);
-    }
-  } else {
-    sprintf(&uuid[0], "nothing\0");
+// readReedSwitch reads the reed switch state with debouncing
+bool readReedSwitch() {
+  bool reading = digitalRead(REED_PIN);
+
+  // If the switch changed, due to noise or pressing:
+  if (reading != lastReedState) {
+    // reset the debouncing timer
+    lastDebounceTime = millis();
   }
 
-  mfrc522.PICC_IsNewCardPresent();
-  mfrc522.PICC_ReadCardSerial();
+  if ((millis() - lastDebounceTime) > DEBOUNCE_DELAY) {
+    // whatever the reading is at, it's been there for longer than the debounce
+    // delay, so take it as the actual current state:
+
+    // if the button state has changed:
+    if (reading != currentReedState) {
+      currentReedState = reading;
+    }
+  }
+
+  // save the reading. Next time through the loop, it'll be the lastReedState:
+  lastReedState = reading;
+
+  // Return true if switch is closed (LOW = closed, HIGH = open)
+  return (currentReedState == LOW);
 }
 
 State Idle(State current_state) {
-  // Scan for current RFID tags.
-  getUuid(current_state.uuid);
-
-  // If we haven't detected any RFID cards, we don't need to do anything.
-  int cmp = strncmp(current_state.uuid, "nothing", 7);
-  if (cmp == 0) {
+  // Read current reed switch state
+  current_state.switchClosed = readReedSwitch();
+  
+  // If switch is closed, we don't need to do anything.
+  if (current_state.switchClosed) {
     return current_state;
   }
 
-  // Notify everyone of the detected UUID.
+  Serial.println("Magnet detected: next state Detected. Sent OSC");
+
+  // Notify everyone that switch iks open (object detected).
   char tag[64];
   sprintf(tag, "/cue/%don/start", sensorId);
   sendOSCData(labIp, talPort, tag);
 
-  Serial.print("Detected: ");
-  Serial.println(current_state.uuid);
-  strncpy(current_state.sentUuid, current_state.uuid, uuidLength);
+  current_state.lastSentState = true;
 
   current_state.update = Detected;
   return current_state;
 }
 
 State Detected(State current_state) {
-  // Scan for RFID and see if the same UUID is present.
-  getUuid(current_state.uuid);
+  // Read current reed switch state
+  current_state.switchClosed = readReedSwitch();
 
-  // If the RFID card, is still there, dont' do anything.
-  int cmp = strncmp(current_state.uuid, "nothing", 7);
-  if (cmp != 0) {
+  // If the switch is open, don't do anything.
+  if (!current_state.switchClosed) {
     return current_state;
   }
 
-  // Notify everyone of the departed UUID.
+  Serial.println("Magnet removed: next state Idle. Sent OSC");
+
+  // Notify everyone that switch closed (object removed).
   char tag[64];
   sprintf(tag, "/cue/%doff/start", sensorId);
   sendOSCData(labIp, talPort, tag);
 
-  Serial.print("Departed: ");
-  Serial.println(current_state.sentUuid);
-  strncpy(current_state.sentUuid, current_state.uuid, uuidLength);
+  current_state.lastSentState = false;
 
   current_state.update = Idle;
   return current_state;
