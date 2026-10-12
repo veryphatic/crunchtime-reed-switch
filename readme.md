@@ -1,67 +1,98 @@
-# CrunchTime
+# crunchtime-reed-switch
 
-CrunchTime is a small device that can be hidden inside objects. It can detect
-RFID tags and will send an OSC message to the specified IP address and port.
+An ESP8266 (D1 Mini) sensor node for live performance voting. Detects magnet proximity via a reed switch and sends OSC messages over WiFi to [crunchtime-tally](../crunchtime-tally) whenever the switch opens or closes. Messages are retried until an `/ack` is received.
 
-The OSC messages are compatible with qLab.
+## How it works
 
-More details at: [http://reprage.com/post/crunchtime](http://reprage.com/post/crunchtime)
+**Hardware**
 
-## Build notes
+- ESP8266 D1 Mini running on WiFi
+- Reed switch on pin `D1` (GPIO5), with internal pull-up — `LOW` = closed/magnet present, `HIGH` = open/magnet removed
+- 50ms debounce on switch state changes
 
-How to build.
+**State machine**
 
-1. Open VSCode to the Crunchtime application
-2. Edit the `main.cpp` file to change the sensor and hostname ID and save
-3. Click the Alien icon, then `Project Tasks` and under `d1_mini` -> `General` run `Build`
-4. Make sure the device is plugged in
-5. Under `d1_mini` -> `General` run `Upload and monitor`
-6. If succesful you should see `WiFi Connected!` and `Firmware Version: 0x92 = v2.0`
+| State | Condition | Action |
+|---|---|---|
+| `Idle` | Switch is closed (magnet present) | Wait |
+| `Idle → Detected` | Switch opens (magnet removed) | Send `/cue/{sensorId}on/start` |
+| `Detected` | Switch is open | Wait |
+| `Detected → Idle` | Switch closes (magnet returns) | Send `/cue/{sensorId}off/start` |
 
-### Windows 11 Support
+**OSC output (UDP)**
 
-- Don't use Windows 11 Silicon labs CP210x Windows drivers v6.7.6 with the D1 Mini; it won't work.
+Each message is sent to the tally server IP and port 8765, and retried every 250ms until an `/ack` is received back on local port 53001.
 
-### .pio/libdeps/d1_mini/OSC/SLIPEncodedBluetoothSerial.h:11:10: fatal error: BluetoothSerial.h: No such file or directory
+| Message | Trigger |
+|---|---|
+| `/cue/{sensorId}on/start` | Magnet removed (switch opened) |
+| `/cue/{sensorId}off/start` | Magnet replaced (switch closed) |
 
-The CMAT OSC library contains additional headers that are missing references to BluetoothSerial.h. 
-Since this application does not require BluetoothSerial, the two affected files can be removed
-- `.pio/libdeps/d1_mini/OSC/SLIPEncodedBluetoothSerial.h`
-- `.pio/libdeps/d1_mini/OSC/SLIPEncodedBluetoothSerial.cpp`
+`sensorId` is a unique integer set per device (1–36 for a 12-voter, 3-choice setup).
 
-### Lonely Binary board support
+## Configuration
 
-As of January 2025 new replacement boards are using the Lonely Binary D1 Mini ESP8266EX boards. Additional confirmations have been added to `platform.io` to support this board.
+### 1. Copy `env_config.example.h` to `env_config.h`
 
-### Apple Silicon
+`env_config.h` is gitignored — it holds WiFi credentials and server IPs per environment.
 
-You'll need to have Rosetta installed to support the C++ libraries. By default it's not. You can install this by opening the application info of Terminal app, and ticking the 'Open with Rosetta' option. Once the app starts Rosettta will install
+```cpp
+// env_config.h
+#pragma once
 
+#define HOME_SSID "mywifi"
+#define HOME_PASSWORD "mypassword"
+#define HOME_IP IPAddress(192, 168, 1, 169)
 
-## Changelog
+#define CRUNCH_TALLY IPAddress(10, 0, 0, 73)   // IP of crunchtime-tally server
+// add more environments as needed
+```
 
-_11/01/2025_
+### 2. Edit `src/main.cpp` for each sensor
 
-- Updated readme
-- Updated `platformio.ini` with `d1_mini` environment
-- Added hostname to sensor boards
+```cpp
+const WifiEnv wifi(HOME_SSID, HOME_PASSWORD, CRUNCH_TALLY);  // pick environment
 
+const unsigned int sensorId = 1;     // unique ID for this sensor (1–36)
+const char *hostname = "ctsensor-1"; // hostname shown on network
+```
+
+Each physical sensor unit needs a unique `sensorId`. The tally server uses this to map sensors to seats and choices — see [crunchtime-tally](../crunchtime-tally) for the mapping.
+
+## Build & flash
+
+Uses [PlatformIO](https://platformio.org/). Target board: `d1_mini`.
+
+```sh
+pio run                          # build
+pio run --target upload          # build + flash
+pio device monitor               # open serial monitor (9600 baud)
+```
+
+On boot the device waits a random 0–15 seconds before connecting to WiFi. This staggers connection attempts when multiple units power on simultaneously. Successful startup prints `WiFi Connected!` and `Sensor ID {n}` to serial.
+
+If WiFi drops during operation, the main loop automatically reconnects.
+
+## Known issues & build notes
+
+**Windows 11 — Silicon Labs CP210x driver**  
+Do not use the CP210x Windows driver v6.7.6 with the D1 Mini — it won't work. Use v6.7.4 or earlier.
+
+**BluetoothSerial compile error**  
+The CMAT OSC library includes Bluetooth headers that aren't available on ESP8266. If you see:
+```
+SLIPEncodedBluetoothSerial.h:11:10: fatal error: BluetoothSerial.h: No such file or directory
+```
+Delete these two files from `.pio/libdeps/d1_mini/OSC/`:
+- `SLIPEncodedBluetoothSerial.h`
+- `SLIPEncodedBluetoothSerial.cpp`
+
+**Lonely Binary D1 Mini boards**  
+Replacement boards using the Lonely Binary ESP8266EX variant are supported via the `d1_mini` environment in `platformio.ini`.
+
+**Apple Silicon**  
+Rosetta is required for the C++ toolchain. Open Terminal's info panel and tick *Open with Rosetta* — Rosetta will install on first launch.
 
 ## License
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software is furnished to do so,
-subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+MIT — see source header for full text.
